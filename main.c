@@ -7,6 +7,7 @@
  */
 int main(void)
 {
-	_printf("Hello %s %c %%\n", "world", '!');
+	_printf("d: %d, i: %i\n", -2147483648, 2147483647);
+	_printf("mix: %s %c %d %% %i\n", "hello", 'X', -42, 42);
 	return (0);
 }

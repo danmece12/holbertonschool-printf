@@ -1,18 +1,13 @@
 /* _printf.c */
 #include "main.h"
 
-/**
- * _puts - write a C string to stdout
- * @s: string (prints "(null)" if s is NULL)
- *
- * Return: number of bytes written
- */
+/* write a C string (prints "(nil)" if s == NULL) */
 static int _puts(const char *s)
 {
 	int n = 0;
 
 	if (!s)
-		s = "(null)";
+		s = "(nil)";
 	while (s[n])
 		n++;
 	if (n)
@@ -20,42 +15,55 @@ static int _puts(const char *s)
 	return (n);
 }
 
-/**
- * _putc - write one character to stdout
- * @c: character
- *
- * Return: 1 on success
- */
+/* write one char */
 static int _putc(char c)
 {
 	return (write(1, &c, 1) == 1 ? 1 : 0);
 }
 
-/**
- * print_conv - handle one conversion specifier
- * @sp: specifier character ('c', 's', or '%')
- * @ap: address of the variadic list
- *
- * Return: number of chars printed for this specifier
- */
+/* write a signed int in decimal */
+static int _putint(int n)
+{
+	long v = n;         /* use long to handle INT_MIN */
+	char buf[20];
+	int i = 0, cnt = 0;
+
+	if (v < 0)
+	{
+		cnt += _putc('-');
+		v = -v;
+	}
+	if (v == 0)
+		return (cnt + _putc('0'));
+	while (v > 0)
+	{
+		buf[i++] = (char)('0' + (v % 10));
+		v /= 10;
+	}
+	while (i--)
+		cnt += _putc(buf[i]);
+	return (cnt);
+}
+
+/* handle one specifier */
 static int print_conv(char sp, va_list *ap)
 {
 	if (sp == 'c')
 		return (_putc((char)va_arg(*ap, int)));
 	if (sp == 's')
 		return (_puts(va_arg(*ap, char *)));
-	if (sp == '%')
+	if (sp == '%' )
 		return (_putc('%'));
-
-	/* unknown specifier: print '%' then the char */
+	if (sp == 'd' || sp == 'i')
+		return (_putint(va_arg(*ap, int)));
+	/* Unknown: print '%' then the char */
 	return (_putc('%') + _putc(sp));
 }
 
 /**
- * _printf - produces output according to a format
- * @format: format string (supports %c, %s, %%)
- *
- * Return: number of characters printed, or -1 on error
+ * _printf - prints according to a format
+ * @format: supports %c, %s, %%, %d, %i
+ * Return: number of chars printed, or -1 on error
  */
 int _printf(const char *format, ...)
 {
@@ -72,12 +80,8 @@ int _printf(const char *format, ...)
 			count += _putc(format[i++]);
 		else
 		{
-			i++;
-			if (!format[i])
-			{
-				va_end(ap);
-				return (-1);
-			}
+			if (!format[++i]) /* stray '%' at end */
+				return (va_end(ap), -1);
 			count += print_conv(format[i++], &ap);
 		}
 	}
