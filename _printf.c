@@ -362,12 +362,23 @@ int _printf(const char *format, ...)
 				else f_hash = 1;
 				format++;
 			}
-			/* width (digits only) */
-			while (*format >= '0' && *format <= '9')
+
+			/* width: '*' or digits */
+			if (*format == '*')
 			{
-				width = width * 10 + (*format - '0');
+				width = va_arg(ap, int);
+				if (width < 0) width = 0;
 				format++;
 			}
+			else
+			{
+				while (*format >= '0' && *format <= '9')
+				{
+					width = width * 10 + (*format - '0');
+					format++;
+				}
+			}
+
 			/* length modifiers */
 			if (*format == 'h') { lenmod = 1; format++; }
 			else if (*format == 'l') { lenmod = 2; format++; }
