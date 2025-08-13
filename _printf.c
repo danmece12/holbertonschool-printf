@@ -133,23 +133,66 @@ static int buf_putuint_base(char *buf, int *len,
 	return (n);
 }
 
+/* unsigned long in any base (for %p on 64-bit) */
+static int buf_putulong_base(char *buf, int *len,
+	unsigned long u, unsigned int base, const char *digits)
+{
+	char tmp[65];
+	int i = 0, n = 0;
+
+	do {
+		tmp[i++] = digits[u % base];
+		u /= base;
+	} while (u);
+
+	while (i--)
+	{
+		if (buf_putc(buf, len, tmp[i]) == -1)
+			return (-1);
+		n++;
+	}
+	return (n);
+}
+
 /* -------- dispatcher for specifiers -------- */
 
 static int handle_conv(char sp, va_list ap, char *buf, int *len)
 {
 	if (sp == 'c')
 		return (buf_putc(buf, len, (char)va_arg(ap, int)));
+
 	if (sp == 's')
 		return (buf_puts(buf, len, va_arg(ap, char *)));
+
 	if (sp == '%')
 		return (buf_putc(buf, len, '%'));
+
 	if (sp == 'd' || sp == 'i')
 		return (buf_putint(buf, len, va_arg(ap, int)));
+
 	if (sp == 'b')
 		return (buf_putuint_base(buf, len,
 			va_arg(ap, unsigned int), 2, "01"));
+
 	if (sp == 'S')
 		return (buf_putS(buf, len, va_arg(ap, char *)));
+
+	if (sp == 'p')
+	{
+		void *ptr = va_arg(ap, void *);
+		int n = 0, m;
+
+		if (!ptr)
+			return (buf_puts(buf, len, "(nil)"));
+
+		if (buf_putc(buf, len, '0') == -1) return (-1);
+		if (buf_putc(buf, len, 'x') == -1) return (-1);
+		n += 2;
+
+		m = buf_putulong_base(buf, len,
+			(unsigned long)ptr, 16, "0123456789abcdef");
+		return (m == -1 ? -1 : n + m);
+	}
 
 	/* unknown specifier: print it literally */
 	if (buf_putc(buf, len, '%') == -1)
