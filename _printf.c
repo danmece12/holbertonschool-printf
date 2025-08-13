@@ -24,7 +24,7 @@ static int _putc(char c)
 /* write a signed int in decimal */
 static int _putint(int n)
 {
-	long v = n;         /* use long to handle INT_MIN */
+	long v = n;         /* handle INT_MIN safely */
 	char buf[20];
 	int i = 0, cnt = 0;
 
@@ -45,6 +45,29 @@ static int _putint(int n)
 	return (cnt);
 }
 
+/* write an unsigned int in binary */
+static int _putbin(unsigned int x)
+{
+	int i, started = 0, cnt = 0;
+
+	if (x == 0)
+		return (_putc('0'));
+
+	for (i = (int)(sizeof(unsigned int) * 8) - 1; i >= 0; i--)
+	{
+		if ((x >> i) & 1U)
+		{
+			started = 1;
+			cnt += _putc('1');
+		}
+		else if (started)
+		{
+			cnt += _putc('0');
+		}
+	}
+	return (cnt);
+}
+
 /* handle one specifier */
 static int print_conv(char sp, va_list *ap)
 {
@@ -52,17 +75,20 @@ static int print_conv(char sp, va_list *ap)
 		return (_putc((char)va_arg(*ap, int)));
 	if (sp == 's')
 		return (_puts(va_arg(*ap, char *)));
-	if (sp == '%' )
+	if (sp == '%')
 		return (_putc('%'));
 	if (sp == 'd' || sp == 'i')
 		return (_putint(va_arg(*ap, int)));
+	if (sp == 'b') /* custom: unsigned int to binary */
+		return (_putbin(va_arg(*ap, unsigned int)));
+
 	/* Unknown: print '%' then the char */
 	return (_putc('%') + _putc(sp));
 }
 
 /**
  * _printf - prints according to a format
- * @format: supports %c, %s, %%, %d, %i
+ * @format: supports %c, %s, %%, %d, %i, %b
  * Return: number of chars printed, or -1 on error
  */
 int _printf(const char *format, ...)
