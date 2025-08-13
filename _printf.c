@@ -1,17 +1,11 @@
-#include <unistd.h>
 #include <stdarg.h>
+#include <unistd.h>
 #include "main.h"
 
 #define BUF_CAP 1024
 
-/* ---------- small buffered-output helpers ---------- */
+/* -------- buffered output helpers -------- */
 
-/**
- * buf_flush - write out buffered bytes
- * @buf: buffer
- * @len: pointer to current length
- * Return: 0 on success, -1 on error
- */
 static int buf_flush(char *buf, int *len)
 {
 	if (*len > 0)
@@ -23,10 +17,6 @@ static int buf_flush(char *buf, int *len)
 	return (0);
 }
 
-/**
- * buf_putc - append one char to buffer (flushing if full)
- * Return: 1 on success, -1 on error
- */
 static int buf_putc(char *buf, int *len, char c)
 {
 	if (*len == BUF_CAP && buf_flush(buf, len) == -1)
@@ -35,16 +25,13 @@ static int buf_putc(char *buf, int *len, char c)
 	return (1);
 }
 
-/**
- * buf_puts - append a C string (or "(nil)" if NULL)
- * Return: number of chars appended, or -1 on error
- */
+/* append a C string; if s == NULL, print "(null)" */
 static int buf_puts(char *buf, int *len, const char *s)
 {
 	int n = 0;
 
 	if (!s)
-		s = "(nil)";
+		s = "(null)";
 	while (*s)
 	{
 		if (buf_putc(buf, len, *s++) == -1)
@@ -54,10 +41,50 @@ static int buf_puts(char *buf, int *len, const char *s)
 	return (n);
 }
 
-/* A tiny integer helper (for %d/%i). No malloc, still buffered. */
+/* print "\xHH" for a byte value v (uppercase hex, always 2 digits) */
+static int buf_put_hex_escape(char *buf, int *len, unsigned int v)
+{
+	static const char HEX[] = "0123456789ABCDEF";
+
+	if (buf_putc(buf, len, '\\') == -1) return (-1);
+	if (buf_putc(buf, len, 'x')  == -1) return (-1);
+	if (buf_putc(buf, len, HEX[(v >> 4) & 0xF]) == -1) return (-1);
+	if (buf_putc(buf, len, HEX[v & 0xF])        == -1) return (-1);
+	return (4);
+}
+
+/* %S : like %s but non-printables become \xHH */
+static int buf_putS(char *buf, int *len, const char *s)
+{
+	int n = 0;
+
+	if (!s)
+		return (buf_puts(buf, len, "(null)"));
+
+	for (; *s; s++)
+	{
+		unsigned char c = (unsigned char)*s;
+
+		if (c < 32 || c >= 127)
+		{
+			if (buf_put_hex_escape(buf, len, c) == -1)
+				return (-1);
+			n += 4;
+		}
+		else
+		{
+			if (buf_putc(buf, len, c) == -1)
+				return (-1);
+			n += 1;
+		}
+	}
+	return (n);
+}
+
+/* small int printer for %d/%i (no malloc, still buffered) */
 static int buf_putint(char *buf, int *len, int v)
 {
-	char tmp[12];  /* enough for -2147483648\0 */
+	char tmp[12];
 	unsigned int u;
 	int i = 0, n = 0;
 
@@ -71,7 +98,6 @@ static int buf_putint(char *buf, int *len, int v)
 	else
 		u = (unsigned int)v;
 
-	/* build digits in reverse */
 	do {
 		tmp[i++] = (char)('0' + (u % 10));
 		u /= 10;
@@ -86,55 +112,59 @@ static int buf_putint(char *buf, int *len, int v)
 	return (n);
 }
 
-/* add near your other helpers */
+/* unsigned in any base (used for %b) */
 static int buf_putuint_base(char *buf, int *len,
-                            unsigned int u, unsigned int base,
-                            const char *digits)
+	unsigned int u, unsigned int base, const char *digits)
 {
-    char tmp[33];             /* enough for 32 bits in base 2 */
-    int i = 0, n = 0;
+	char tmp[33];
+	int i = 0, n = 0;
 
-    /* build digits in reverse */
-    do {
-        tmp[i++] = digits[u % base];
-        u /= base;
-    } while (u);
+	do {
+		tmp[i++] = digits[u % base];
+		u /= base;
+	} while (u);
 
-    while (i--) {
-        if (buf_putc(buf, len, tmp[i]) == -1)
-            return (-1);
-        n++;
-    }
-    return (n);
+	while (i--)
+	{
+		if (buf_putc(buf, len, tmp[i]) == -1)
+			return (-1);
+		n++;
+	}
+	return (n);
 }
 
-/* ---------- minimal dispatcher: %c, %s, %%, %d, %i ---------- */
+/* -------- dispatcher for specifiers -------- */
 
 static int handle_conv(char sp, va_list ap, char *buf, int *len)
 {
-    if (sp == 'c') return buf_putc(buf, len, (char)va_arg(ap, int));
-    if (sp == 's') return buf_puts(buf, len, va_arg(ap, char *));
-    if (sp == '%') return buf_putc(buf, len, '%');
-    if (sp == 'd' || sp == 'i') return buf_putint(buf, len, va_arg(ap, int));
-    if (sp == 'b')  /* <<<<<< add this */
-        return buf_putuint_base(buf, len,
-                                va_arg(ap, unsigned int), 2, "01");
+	if (sp == 'c')
+		return (buf_putc(buf, len, (char)va_arg(ap, int)));
+	if (sp == 's')
+		return (buf_puts(buf, len, va_arg(ap, char *)));
+	if (sp == '%')
+		return (buf_putc(buf, len, '%'));
+	if (sp == 'd' || sp == 'i')
+		return (buf_putint(buf, len, va_arg(ap, int)));
+	if (sp == 'b')
+		return (buf_putuint_base(buf, len,
+			va_arg(ap, unsigned int), 2, "01"));
+	if (sp == 'S')
+		return (buf_putS(buf, len, va_arg(ap, char *)));
 
-    /* unknown specifier: print literally */
-    if (buf_putc(buf, len, '%') == -1) return (-1);
-    if (buf_putc(buf, len, sp) == -1) return (-1);
-    return (2);
+	/* unknown specifier: print it literally */
+	if (buf_putc(buf, len, '%') == -1)
+		return (-1);
+	if (buf_putc(buf, len, sp) == -1)
+		return (-1);
+	return (2);
 }
 
-/**
- * _printf - minimal printf with 1KB local buffering
- * @format: format string
- * Return: number of characters printed, or -1 on error
- */
+/* -------- public API -------- */
+
 int _printf(const char *format, ...)
 {
 	char buf[BUF_CAP];
-	int len = 0, out = 0;
+	int len = 0, out = 0, ret;
 	va_list ap;
 
 	if (!format)
@@ -148,17 +178,17 @@ int _printf(const char *format, ...)
 			if (buf_putc(buf, &len, *format++) == -1)
 			{ out = -1; break; }
 			out++;
+			continue;
 		}
-		else
-		{
-			int ret;
 
-			format++; /* skip '%' */
-			if (!*format) { out = -1; break; } /* trailing '%' */
-			ret = handle_conv(*format++, ap, buf, &len);
-			if (ret == -1) { out = -1; break; }
-			out += ret;
-		}
+		format++;        /* skip '%' */
+		if (!*format)    /* trailing '%' is an error */
+		{ out = -1; break; }
+
+		ret = handle_conv(*format++, ap, buf, &len);
+		if (ret == -1)
+		{ out = -1; break; }
+		out += ret;
 	}
 	if (out != -1 && buf_flush(buf, &len) == -1)
 		out = -1;

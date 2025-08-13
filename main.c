@@ -7,9 +7,7 @@
  */
 int main(void)
 {
-	_printf("u=%u\n", 4294967295U);
-	_printf("o=%o\n", 0755);
-	_printf("x=%x\n", 0xBEEF);
-	_printf("X=%X\n", 0xBEEF);
-	return (0);
+	_printf("%S\n", "Best\nSchool");   /* -> Best\x0ASchool */
+    _printf("%S\n", "\tHi\x7F!");      /* -> \x09Hi\x7F!  (127 becomes \x7F) */
+    return 0;
 }
