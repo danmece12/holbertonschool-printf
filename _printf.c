@@ -76,7 +76,7 @@ static int print_conv(char sp, va_list *ap)
 	if (sp == 's')
 		return (_puts(va_arg(*ap, char *)));
 	if (sp == '%')
-		return (_putc('%')));
+		return (_putc('%'));
 	if (sp == 'd' || sp == 'i')
 		return (_putint(va_arg(*ap, int)));
 	if (sp == 'b') /* custom: unsigned int to binary */
