@@ -86,23 +86,44 @@ static int buf_putint(char *buf, int *len, int v)
 	return (n);
 }
 
+/* add near your other helpers */
+static int buf_putuint_base(char *buf, int *len,
+                            unsigned int u, unsigned int base,
+                            const char *digits)
+{
+    char tmp[33];             /* enough for 32 bits in base 2 */
+    int i = 0, n = 0;
+
+    /* build digits in reverse */
+    do {
+        tmp[i++] = digits[u % base];
+        u /= base;
+    } while (u);
+
+    while (i--) {
+        if (buf_putc(buf, len, tmp[i]) == -1)
+            return (-1);
+        n++;
+    }
+    return (n);
+}
+
 /* ---------- minimal dispatcher: %c, %s, %%, %d, %i ---------- */
 
 static int handle_conv(char sp, va_list ap, char *buf, int *len)
 {
-	if (sp == 'c')
-		return buf_putc(buf, len, (char)va_arg(ap, int));
-	if (sp == 's')
-		return buf_puts(buf, len, va_arg(ap, char *));
-	if (sp == '%')
-		return buf_putc(buf, len, '%');
-	if (sp == 'd' || sp == 'i')
-		return buf_putint(buf, len, va_arg(ap, int));
+    if (sp == 'c') return buf_putc(buf, len, (char)va_arg(ap, int));
+    if (sp == 's') return buf_puts(buf, len, va_arg(ap, char *));
+    if (sp == '%') return buf_putc(buf, len, '%');
+    if (sp == 'd' || sp == 'i') return buf_putint(buf, len, va_arg(ap, int));
+    if (sp == 'b')  /* <<<<<< add this */
+        return buf_putuint_base(buf, len,
+                                va_arg(ap, unsigned int), 2, "01");
 
-	/* unknown specifier: print literally like printf does */
-	if (buf_putc(buf, len, '%') == -1) return (-1);
-	if (buf_putc(buf, len, sp) == -1) return (-1);
-	return (2);
+    /* unknown specifier: print literally */
+    if (buf_putc(buf, len, '%') == -1) return (-1);
+    if (buf_putc(buf, len, sp) == -1) return (-1);
+    return (2);
 }
 
 /**
