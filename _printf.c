@@ -4,8 +4,7 @@
 
 #define BUF_CAP 1024
 
-/* -------- buffered output helpers -------- */
-
+/* ---------- buffered output helpers ---------- */
 static int buf_flush(char *buf, int *len)
 {
 	if (*len > 0)
@@ -25,7 +24,6 @@ static int buf_putc(char *buf, int *len, char c)
 	return (1);
 }
 
-/* append a C string; if s == NULL, print "(null)" */
 static int buf_puts(char *buf, int *len, const char *s)
 {
 	int n = 0;
@@ -41,7 +39,7 @@ static int buf_puts(char *buf, int *len, const char *s)
 	return (n);
 }
 
-/* print "\xHH" for a byte value v (uppercase hex, always 2 digits) */
+/* \xHH escape (uppercase hex) for %S */
 static int buf_put_hex_escape(char *buf, int *len, unsigned int v)
 {
 	static const char HEX[] = "0123456789ABCDEF";
@@ -53,7 +51,6 @@ static int buf_put_hex_escape(char *buf, int *len, unsigned int v)
 	return (4);
 }
 
-/* %S : like %s but non-printables become \xHH */
 static int buf_putS(char *buf, int *len, const char *s)
 {
 	int n = 0;
@@ -81,22 +78,11 @@ static int buf_putS(char *buf, int *len, const char *s)
 	return (n);
 }
 
-/* small int printer for %d/%i (no malloc, still buffered) */
-static int buf_putint(char *buf, int *len, int v)
+/* decimal signed */
+static int buf_putint_core(char *buf, int *len, unsigned int u)
 {
 	char tmp[12];
-	unsigned int u;
 	int i = 0, n = 0;
-
-	if (v < 0)
-	{
-		if (buf_putc(buf, len, '-') == -1)
-			return (-1);
-		n++;
-		u = (unsigned int)(-(long)v);
-	}
-	else
-		u = (unsigned int)v;
 
 	do {
 		tmp[i++] = (char)('0' + (u % 10));
@@ -112,29 +98,29 @@ static int buf_putint(char *buf, int *len, int v)
 	return (n);
 }
 
-/* unsigned in any base (used for %b) */
-static int buf_putuint_base(char *buf, int *len,
-	unsigned int u, unsigned int base, const char *digits)
+/* %d / %i with + / space flags */
+static int buf_putint_flags(char *buf, int *len, int v, int plus, int space)
 {
-	char tmp[33];
-	int i = 0, n = 0;
+	int n = 0;
 
-	do {
-		tmp[i++] = digits[u % base];
-		u /= base;
-	} while (u);
-
-	while (i--)
+	if (v < 0)
 	{
-		if (buf_putc(buf, len, tmp[i]) == -1)
-			return (-1);
+		if (buf_putc(buf, len, '-') == -1) return (-1);
 		n++;
+		return (n + buf_putint_core(buf, len, (unsigned int)(-(long)v)));
 	}
-	return (n);
+
+	/* positive: optional sign or leading space */
+	if (plus)
+	{ if (buf_putc(buf, len, '+') == -1) return (-1); n++; }
+	else if (space)
+	{ if (buf_putc(buf, len, ' ') == -1) return (-1); n++; }
+
+	return (n + buf_putint_core(buf, len, (unsigned int)v));
 }
 
-/* unsigned long in any base (for %p on 64-bit) */
-static int buf_putulong_base(char *buf, int *len,
+/* generic unsigned (for %u, %o, %x, %X, %b) */
+static int buf_putuint_base(char *buf, int *len,
 	unsigned long u, unsigned int base, const char *digits)
 {
 	char tmp[65];
@@ -154,29 +140,22 @@ static int buf_putulong_base(char *buf, int *len,
 	return (n);
 }
 
-/* -------- dispatcher for specifiers -------- */
-
-static int handle_conv(char sp, va_list ap, char *buf, int *len)
+/* ---------- dispatcher with flags ---------- */
+static int handle_conv(char sp, va_list ap, char *buf, int *len,
+	int f_plus, int f_space, int f_hash)
 {
+	/* simple ones first */
 	if (sp == 'c')
 		return (buf_putc(buf, len, (char)va_arg(ap, int)));
-
 	if (sp == 's')
 		return (buf_puts(buf, len, va_arg(ap, char *)));
-
 	if (sp == '%')
 		return (buf_putc(buf, len, '%'));
-
-	if (sp == 'd' || sp == 'i')
-		return (buf_putint(buf, len, va_arg(ap, int)));
-
-	if (sp == 'b')
-		return (buf_putuint_base(buf, len,
-			va_arg(ap, unsigned int), 2, "01"));
-
 	if (sp == 'S')
 		return (buf_putS(buf, len, va_arg(ap, char *)));
-
+	if (sp == 'b')
+		return (buf_putuint_base(buf, len,
+			(unsigned int)va_arg(ap, unsigned int), 2, "01"));
 	if (sp == 'p')
 	{
 		void *ptr = va_arg(ap, void *);
@@ -184,30 +163,68 @@ static int handle_conv(char sp, va_list ap, char *buf, int *len)
 
 		if (!ptr)
 			return (buf_puts(buf, len, "(nil)"));
-
 		if (buf_putc(buf, len, '0') == -1) return (-1);
 		if (buf_putc(buf, len, 'x') == -1) return (-1);
 		n += 2;
-
-		m = buf_putulong_base(buf, len,
+		m = buf_putuint_base(buf, len,
 			(unsigned long)ptr, 16, "0123456789abcdef");
 		return (m == -1 ? -1 : n + m);
 	}
 
-	/* unknown specifier: print it literally */
-	if (buf_putc(buf, len, '%') == -1)
-		return (-1);
-	if (buf_putc(buf, len, sp) == -1)
-		return (-1);
+	/* signed decimal with + / space */
+	if (sp == 'd' || sp == 'i')
+		return (buf_putint_flags(buf, len, va_arg(ap, int), f_plus, f_space));
+
+	/* unsigned family (flags: only # for o/x/X) */
+	if (sp == 'u')
+		return (buf_putuint_base(buf, len,
+			(unsigned int)va_arg(ap, unsigned int), 10, "0123456789"));
+
+	if (sp == 'o' || sp == 'x' || sp == 'X')
+	{
+		unsigned int u = va_arg(ap, unsigned int);
+		int n = 0;
+
+		if (f_hash && u != 0)
+		{
+			if (sp == 'o')
+			{
+				if (buf_putc(buf, len, '0') == -1) return (-1);
+				n++;
+			}
+			else if (sp == 'x')
+			{
+				if (buf_putc(buf, len, '0') == -1) return (-1);
+				if (buf_putc(buf, len, 'x') == -1) return (-1);
+				n += 2;
+			}
+			else /* 'X' */
+			{
+				if (buf_putc(buf, len, '0') == -1) return (-1);
+				if (buf_putc(buf, len, 'X') == -1) return (-1);
+				n += 2;
+			}
+		}
+
+		if (sp == 'o')
+			return (n + buf_putuint_base(buf, len, u, 8, "01234567"));
+		if (sp == 'x')
+			return (n + buf_putuint_base(buf, len, u, 16, "0123456789abcdef"));
+		/* 'X' */
+		return (n + buf_putuint_base(buf, len, u, 16, "0123456789ABCDEF"));
+	}
+
+	/* unknown specifier: print it literally (%<char>) */
+	if (buf_putc(buf, len, '%') == -1) return (-1);
+	if (buf_putc(buf, len, sp) == -1) return (-1);
 	return (2);
 }
 
-/* -------- public API -------- */
-
+/* ---------- public API ---------- */
 int _printf(const char *format, ...)
 {
 	char buf[BUF_CAP];
-	int len = 0, out = 0, ret;
+	int len = 0, out = 0;
 	va_list ap;
 
 	if (!format)
@@ -224,15 +241,26 @@ int _printf(const char *format, ...)
 			continue;
 		}
 
-		format++;        /* skip '%' */
-		if (!*format)    /* trailing '%' is an error */
-		{ out = -1; break; }
+		/* skip '%' and parse flags (+, space, #) */
+		{
+			int f_plus = 0, f_space = 0, f_hash = 0, ret;
 
-		ret = handle_conv(*format++, ap, buf, &len);
-		if (ret == -1)
-		{ out = -1; break; }
-		out += ret;
+			format++;
+			while (*format == '+' || *format == ' ' || *format == '#')
+			{
+				if (*format == '+') f_plus = 1;
+				else if (*format == ' ') f_space = 1;
+				else f_hash = 1;
+				format++;
+			}
+			if (!*format) { out = -1; break; } /* lone '%' or '%' + flags at end */
+
+			ret = handle_conv(*format++, ap, buf, &len, f_plus, f_space, f_hash);
+			if (ret == -1) { out = -1; break; }
+			out += ret;
+		}
 	}
+
 	if (out != -1 && buf_flush(buf, &len) == -1)
 		out = -1;
 	va_end(ap);
