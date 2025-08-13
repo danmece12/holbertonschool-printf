@@ -1,124 +1,146 @@
+#include <unistd.h>
+#include <stdarg.h>
 #include "main.h"
 
-/* write a C string (prints "(nil)" if s == NULL) */
-static int _puts(const char *s)
+#define BUF_CAP 1024
+
+/* ---------- small buffered-output helpers ---------- */
+
+/**
+ * buf_flush - write out buffered bytes
+ * @buf: buffer
+ * @len: pointer to current length
+ * Return: 0 on success, -1 on error
+ */
+static int buf_flush(char *buf, int *len)
+{
+	if (*len > 0)
+	{
+		if (write(1, buf, *len) == -1)
+			return (-1);
+		*len = 0;
+	}
+	return (0);
+}
+
+/**
+ * buf_putc - append one char to buffer (flushing if full)
+ * Return: 1 on success, -1 on error
+ */
+static int buf_putc(char *buf, int *len, char c)
+{
+	if (*len == BUF_CAP && buf_flush(buf, len) == -1)
+		return (-1);
+	buf[(*len)++] = c;
+	return (1);
+}
+
+/**
+ * buf_puts - append a C string (or "(nil)" if NULL)
+ * Return: number of chars appended, or -1 on error
+ */
+static int buf_puts(char *buf, int *len, const char *s)
 {
 	int n = 0;
 
 	if (!s)
 		s = "(nil)";
-	while (s[n])
+	while (*s)
+	{
+		if (buf_putc(buf, len, *s++) == -1)
+			return (-1);
 		n++;
-	if (n)
-		write(1, s, n);
+	}
 	return (n);
 }
 
-/* write one char */
-static int _putc(char c)
+/* A tiny integer helper (for %d/%i). No malloc, still buffered. */
+static int buf_putint(char *buf, int *len, int v)
 {
-	return (write(1, &c, 1) == 1 ? 1 : 0);
-}
-
-/* write a signed int in decimal */
-static int _putint(int n)
-{
-	long v = n;         /* handle INT_MIN safely */
-	char buf[20];
-	int i = 0, cnt = 0;
+	char tmp[12];  /* enough for -2147483648\0 */
+	unsigned int u;
+	int i = 0, n = 0;
 
 	if (v < 0)
 	{
-		cnt += _putc('-');
-		v = -v;
+		if (buf_putc(buf, len, '-') == -1)
+			return (-1);
+		n++;
+		u = (unsigned int)(-(long)v);
 	}
-	if (v == 0)
-		return (cnt + _putc('0'));
-	while (v > 0)
-	{
-		buf[i++] = (char)('0' + (v % 10));
-		v /= 10;
-	}
+	else
+		u = (unsigned int)v;
+
+	/* build digits in reverse */
+	do {
+		tmp[i++] = (char)('0' + (u % 10));
+		u /= 10;
+	} while (u);
+
 	while (i--)
-		cnt += _putc(buf[i]);
-	return (cnt);
-}
-
-/* write an unsigned int in an arbitrary base (2..16) */
-static int _putuint_base(unsigned int v, unsigned int base, const char *digits)
-{
-	char buf[32];
-	int i = 0, cnt = 0;
-
-	if (v == 0)
-		return (_putc('0'));
-	while (v)
 	{
-		buf[i++] = digits[v % base];
-		v /= base;
+		if (buf_putc(buf, len, tmp[i]) == -1)
+			return (-1);
+		n++;
 	}
-	while (i--)
-		cnt += _putc(buf[i]);
-	return (cnt);
+	return (n);
 }
 
-/* write an unsigned int in binary */
-static int _putbin(unsigned int x)
-{
-	return (_putuint_base(x, 2, "01"));
-}
+/* ---------- minimal dispatcher: %c, %s, %%, %d, %i ---------- */
 
-/* handle one specifier */
-static int print_conv(char sp, va_list *ap)
+static int handle_conv(char sp, va_list ap, char *buf, int *len)
 {
 	if (sp == 'c')
-		return (_putc((char)va_arg(*ap, int)));
+		return buf_putc(buf, len, (char)va_arg(ap, int));
 	if (sp == 's')
-		return (_puts(va_arg(*ap, char *)));
+		return buf_puts(buf, len, va_arg(ap, char *));
 	if (sp == '%')
-		return (_putc('%'));
+		return buf_putc(buf, len, '%');
 	if (sp == 'd' || sp == 'i')
-		return (_putint(va_arg(*ap, int)));
-	if (sp == 'b') /* custom: unsigned int to binary */
-		return (_putbin(va_arg(*ap, unsigned int)));
-	if (sp == 'u')
-		return (_putuint_base(va_arg(*ap, unsigned int), 10, "0123456789"));
-	if (sp == 'o')
-		return (_putuint_base(va_arg(*ap, unsigned int), 8, "01234567"));
-	if (sp == 'x')
-		return (_putuint_base(va_arg(*ap, unsigned int), 16, "0123456789abcdef"));
-	if (sp == 'X')
-		return (_putuint_base(va_arg(*ap, unsigned int), 16, "0123456789ABCDEF"));
+		return buf_putint(buf, len, va_arg(ap, int));
 
-	/* Unknown: print '%' then the char */
-	return (_putc('%') + _putc(sp));
+	/* unknown specifier: print literally like printf does */
+	if (buf_putc(buf, len, '%') == -1) return (-1);
+	if (buf_putc(buf, len, sp) == -1) return (-1);
+	return (2);
 }
 
 /**
- * _printf - prints according to a format
- * @format: supports %c, %s, %%, %d, %i, %b, %u, %o, %x, %X
- * Return: number of chars printed, or -1 on error
+ * _printf - minimal printf with 1KB local buffering
+ * @format: format string
+ * Return: number of characters printed, or -1 on error
  */
 int _printf(const char *format, ...)
 {
+	char buf[BUF_CAP];
+	int len = 0, out = 0;
 	va_list ap;
-	int count = 0, i = 0;
 
 	if (!format)
 		return (-1);
 
 	va_start(ap, format);
-	while (format[i])
+	while (*format)
 	{
-		if (format[i] != '%')
-			count += _putc(format[i++]);
+		if (*format != '%')
+		{
+			if (buf_putc(buf, &len, *format++) == -1)
+			{ out = -1; break; }
+			out++;
+		}
 		else
 		{
-			if (!format[++i]) /* stray '%' at end */
-				return (va_end(ap), -1);
-			count += print_conv(format[i++], &ap);
+			int ret;
+
+			format++; /* skip '%' */
+			if (!*format) { out = -1; break; } /* trailing '%' */
+			ret = handle_conv(*format++, ap, buf, &len);
+			if (ret == -1) { out = -1; break; }
+			out += ret;
 		}
 	}
+	if (out != -1 && buf_flush(buf, &len) == -1)
+		out = -1;
 	va_end(ap);
-	return (count);
+	return (out);
 }
