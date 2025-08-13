@@ -1,0 +1,87 @@
+.\" man_3_printf — manual page for holbertonschool-printf
+.TH _PRINTF 3 "August 2025" "holbertonschool-printf" "Library Functions Manual"
+.SH NAME
+_printf \- formatted output conversion to standard output
+.SH SYNOPSIS
+.nf
+#include "main.h"
+
+int _printf(const char *format, ...);
+.fi
+.SH DESCRIPTION
+.B _printf()
+writes output to the standard output stream according to a
+.B format
+string. The format string is composed of ordinary characters (printed
+verbatim) and conversion specifiers beginning with '%%'.
+
+This implementation is a subset of the C library
+.BR printf (3)
+and supports only the following conversion specifiers. No flags,
+field width, precision, or length modifiers are handled.
+
+.TP
+.B %c
+Print a single character. The corresponding argument is an
+.B int
+(promoted char). If the character is '\\0', it is written but not visible.
+
+.TP
+.B %s
+Print a NUL-terminated string. If the corresponding argument is
+.B NULL
+the string
+.B "(nil)"
+is printed.
+
+.TP
+.B %%
+Print a literal percent sign.
+
+.TP
+.B %d
+.TP
+.B %i
+Print a signed decimal integer. Negative numbers are prefixed with
+a minus sign. The implementation handles
+.BR INT_MIN .
+
+.PP
+Unknown specifiers are printed as a literal '%%' followed by the
+unknown character.
+
+.PP
+This implementation performs output using
+.BR write (2)
+and does not allocate dynamic memory.
+
+.SH RETURN VALUE
+On success,
+.B _printf()
+returns the number of characters printed. On error it returns
+.BR -1 .
+Errors include a
+.B NULL
+.B format
+pointer or a stray '%%' at the end of the format string.
+
+.SH EXAMPLES
+.nf
+#include "main.h"
+
+int main(void)
+{
+    _printf("Hello %s! Answer: %d%%\\n", "world", 42);
+    _printf("Char: %c, Int: %i\\n", 'A', -123);
+    _printf("%s\\n", (char *)0);      /* prints (nil) */
+    return 0;
+}
+.fi
+
+.SH NOTES
+This is an educational reimplementation and is not a full replacement
+for the standard C library
+.BR printf (3) .
+
+.SH SEE ALSO
+printf(3), dprintf(3), write(2)
